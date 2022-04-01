@@ -7,5 +7,6 @@ This repository contains the following files and directories:
 - `match_data`: contains csv files of the match data used to create the dashboard. Each csv file contains shot data for a single match, where each row/observation is a shot, and each column is a variable about that shot. 
 - `models`: contains retrospective data and R code used to train a random forest model to create the Expected Goals algorithm, which is then applied to the match data during the dashboard build. 
 - `out`: contains summarised and tidy data files that are outputs from the `shooting_dashboard_mockup.rmd` file. 
+- `report`: contains code and data used to create the passing network and heatmap visualisations in the report.
 - `rsconnect`: contains the information used to deploy the dashboard to the shinyapps server. 
 - `shooting_dashboard_mockup.rmd`: the R code file used to create the dashboard. This is the main program file. 
