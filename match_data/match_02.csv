@@ -1,0 +1,24 @@
+game_id,shot_id,player_id,x_start,y_start,x,y,y0,outcome
+2,1,player 2,1,2,7,13,17,NoGoal
+2,2,player 4,1,2,18,38,8,NoGoal
+2,3,player 1,1,2,12,28,2,NoGoal
+2,4,player 3,1,2,16,29,1,NoGoal
+2,5,player 1,1,2,9,38,8,NoGoal
+2,6,player 4,1,2,21,29,1,NoGoal
+2,7,player 1,1,2,15,34,4,NoGoal
+2,8,player 1,1,2,8,31,1,NoGoal
+2,9,player 5,1,2,17,27,3,NoGoal
+2,10,player 5,1,2,4,28,2,NoGoal
+2,11,player 5,1,2,9,35,5,NoGoal
+2,12,player 3,1,2,8,38,8,NoGoal
+2,13,player 2,1,2,7,34,4,Goal
+2,14,player 5,1,2,17,46,16,NoGoal
+2,15,player 2,1,2,4,31,1,NoGoal
+2,16,player 3,1,2,22,36,6,NoGoal
+2,17,player 3,1,2,9,34,4,NoGoal
+2,18,player 5,1,2,7,31,1,Goal
+2,19,player 2,1,2,29,39,9,NoGoal
+2,20,player 5,1,2,6,26,4,Goal
+2,21,player 1,1,2,13,20,10,NoGoal
+2,22,player 5,1,2,21,35,5,NoGoal
+2,23,player 4,1,2,8,29,1,Goal

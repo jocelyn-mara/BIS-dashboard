@@ -1,0 +1,354 @@
+---
+title: "Shooting Performance"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+# load the required packages
+library(flexdashboard)
+library(tidyverse)
+library(ggsoccer)
+library(plotly)
+library(caret)
+library(randomForest)
+```
+
+```{r}
+# Find the newest file in the 'match_data' directory so we can read this in.
+# The newest file will be data for the most recent match that has been played.
+
+# get the paths to all files in the 'match_data' directory
+# and store them as a vector in file_paths
+file_paths <- paste("match_data/", list.files(path = "match_data"), sep = "")
+
+# get information on each file including creation time
+file_info <- file.info(file_paths)
+
+# find the newest file in the 'data' directory and save the path
+# in the object 'newest_file'
+newest_file <- file_info %>%
+  slice(which.max(mtime)) %>% # or use ctime for created time
+  rownames()
+```
+
+```{r}
+# Read in the data and model object and apply the model to the data
+
+# Read in the most recent data to analyse
+df <- read_csv(newest_file)
+
+# Load goal_model so it is available in the global environment
+goal_model <- readRDS("models/goal_model.rds")
+```
+
+```{r}
+# Apply the model to the data to calculate the goal probabilities
+probs <- predict(goal_model, newdata = df, type = "prob") %>%
+  # select just the goal probabilities, and remove NoGoal probabilites
+  select(Goal) %>%
+  # convert from dataframe to a "flat" vector
+  unlist() %>%
+  # remove the rownames
+  unname()
+
+# Attach the probs object to df as a new variable
+df <- df %>%
+  mutate(goal_probs = round(probs, 2)) %>%
+  mutate(outcome = factor(outcome, 
+                          levels = c("Goal", "NoGoal"),
+                          labels = c("Goal", "No Goal"))) %>%
+  mutate(player_id = str_replace(string = player_id,
+                                 pattern = "p", 
+                                 replacement = "P"))
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Shot Locations 
+
+```{r}
+# set colour palette for red and dark blue
+colour_palette_2 <- c("Goal" = "#ffa600", "No Goal" = "#003f5c")
+
+# create shot visualisation using ggplot2 & ggsoccer packages
+# see https://github.com/Torvaney/ggsoccer for more info
+
+# get pitch dimensions to use in the visualisation
+source("helpers/soccer-pitch-dimensions.R")
+
+# add variable information for plot
+shot_plot <- ggplot(data = df,
+       aes(x = x, y = y, fill = outcome,
+           # add in text to show when hover mouse over visualisation
+           # html <br> adds a new line
+           text = paste("Player:", player_id,
+                        "<br>x:", x,
+                        "<br>y:", y,
+                        "<br>Goal Prob:", goal_probs))) +
+
+  # add settings for the pitch image
+  annotate_pitch(dimensions = pitch_custom,
+                 colour = "white",
+                 fill = "#7fc47f",
+                 limits = FALSE) +
+
+  # add appearance settings for the points shown
+  # note this should go after the annotate_pitch function so the
+  # points are "on top" and not hidden behind the pitch
+  geom_point(colour = "black", alpha = 0.8, pch = 21, size = 2) +
+  
+  # change the points to be darkblue for no goal and red for goal
+  scale_fill_manual(values = colour_palette_2) +
+
+  # Change the legend title
+  # Note this is linked to the fill aesthetic in aes() above
+  labs(fill = "") +
+
+  # removes background and axes from the ggplot
+  theme_pitch() +
+
+  # move the legend to the top of the plot
+  theme(legend.position = "right")
+```
+
+```{r}
+# create interactive visualisation using plotly package
+# i.e. convert a ggplot to a plotly plot
+# see https://plotly-r.com for more info
+
+# shot_plot is the plot we want to convert to plotly plot
+shot_plot %>%
+  # this setting shows what info to produce on mouse hover
+  # note that it is linked to the text arg in the ggplot
+  ggplotly(tooltip = "text") %>%
+  # set some options to change the font and legend
+  layout(font = list(family = "Arial"))
+```
+
+### Player Performance
+
+```{r}
+# summarise the key variables for each player
+player_summary <- df %>%
+  group_by(player_id) %>%
+  summarise(n_shots = n(),
+            # calculate observed goals
+            n_goals = sum(outcome == "Goal"),
+            # calculate observed goals per shot
+            n_goals_per_shot = n_goals / n_shots,
+            # calculate total expected goals
+            exp_goals = sum(goal_probs),
+            # calculated expected goals per shot
+            exp_goals_per_shot = exp_goals / n_shots) %>%
+  # round variables to 2 decimal places
+  mutate(across(c(n_goals_per_shot, exp_goals, exp_goals_per_shot),
+                ~round(.x, digits = 1)))
+```
+
+```{r}
+player_plot <- player_summary %>%
+  
+  # reorder the x axis so the player with the most exp_goals appears first
+  ggplot(aes(x = reorder(player_id, desc(exp_goals)),
+             text = paste("Player:", player_id,
+                          "<br>Exp Goals:", exp_goals,
+                          "<br>Goals:", n_goals))) +
+  
+  # create a bar graph of exp_goals for each player
+  geom_bar(aes(y = exp_goals, fill = "Exp Goals"), 
+           stat = "identity") +
+  
+  # add another bar graph layer for n_goals
+  geom_bar(aes(y = n_goals, fill = "Goals"), 
+           stat = "identity", width = 0.5) +
+  
+  # change the axis titles
+  labs(y = "Goals & expected goals", x = "Player",
+       fill = "") +
+  
+  scale_fill_manual(values = c("#003f5c", "#bc5090")) +
+  
+  # apply the 'minimal' theme appearance to remove grey background
+  theme_minimal()
+```
+
+```{r}
+# create interactive visualisation using plotly
+
+# player_plot is the plot we want to convert to plotly plot
+player_plot %>%
+  # this setting shows what info to produce on mouse hover
+  # note that it is linked to the text arg in the ggplot
+  ggplotly(tooltip = "text") %>%
+  # set some options to change the font and legend
+  layout(font = list(family = "Arial"))
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Shot Assists
+
+```{r}
+# create passing trajectory plot
+pass_plot <- df %>%
+  ggplot(aes(text = paste("Player:", player_id,
+                        "<br>x:", x,
+                        "<br>y:", y,
+                        "<br>Outcome:", outcome)
+  )) +
+
+  # add settings for the pitch image
+  annotate_pitch(dimensions = pitch_custom,
+                 colour = "white",
+                 fill = "#7fc47f",
+                 limits = FALSE) +
+  
+  
+  # draw the arrows based on the start and end coordinates
+  geom_segment(aes(x = x_start, y = y_start, xend = x, yend = y,
+                   colour = outcome)) +
+  
+  geom_point(aes(x = x, y = y, colour = outcome)) +
+ 
+  # Change the legend title
+  # Note this is linked to the fill aesthetic in aes() above
+  labs(colour = "") +
+  
+  scale_colour_manual(values = colour_palette_2) +
+
+  # removes background and axes from the ggplot
+  theme_pitch() +
+
+  # move the legend to the top of the plot
+  theme(legend.position = "right")
+```
+
+```{r}
+# create interactive visualisation using plotly package
+# i.e. convert a ggplot to a plotly plot
+# see https://plotly-r.com for more info
+
+# shot_plot is the plot we want to convert to plotly plot
+pass_plot %>%
+  # this setting shows what info to produce on mouse hover
+  # note that it is linked to the text arg in the ggplot
+  ggplotly(tooltip = "text") %>%
+  # set some options to change the font and legend
+  layout(font = list(family = "Arial"))
+```
+
+
+### Player Form
+
+```{r}
+# Combine current match data with previous match data to show trends
+# and/or summarised information
+
+# create empty data frame to start
+season_data <- data.frame()
+
+# loop through match files named in 'file_paths'
+  for (i in 1:length(file_paths)){
+
+    # read in each match file one at a time
+    x <- read_csv(file_paths[i]) %>%
+      mutate(game_id = as.numeric(game_id))
+
+    # append x to season_data
+    season_data <- bind_rows(season_data, x)
+
+  }
+```
+
+```{r}
+# Apply the model to the season data to calculate the goal probabilities
+probs <- predict(goal_model, newdata = season_data, type = "prob") %>%
+  # select just the goal probabilities, and remove NoGoal probabilites
+  select(Goal) %>%
+  # convert from dataframe to a "flat" vector
+  unlist() %>%
+  # remove the rownames
+  unname()
+
+# Attach the probs object to df as a new variable
+season_data <- season_data %>%
+  mutate(goal_probs = probs) %>%
+  mutate(player_id = str_replace(string = player_id, 
+                                 pattern = "p", 
+                                 replace = "P"))
+```
+
+```{r}
+# Summarise data by player and game to
+# show trends over multiple games for each player
+
+player_form_data <- season_data %>%
+  # make calculations by player_id and game_id
+  group_by(player_id, game_id) %>%
+            # calculate number of shots
+  summarise(n_shots = n(),
+            # calculate observed goals
+            n_goals = sum(outcome == "Goal"),
+            # calculate expected goals
+            exp_goals = round(sum(goal_probs), 1))
+
+#write_csv(player_form_data, "out/player_form_data.csv")
+```
+
+```{r}
+# Create a colour palette consistent with other colours
+# used throughout the dashboard. This palette was created with
+# https://learnui.design/tools/data-color-picker.html
+colour_palette_5 <- c("#003f5c", "#58508d", "#bc5090", "#ff6361", "#ffa600")
+
+# Create an area chart to show exp_goals for each player in each game
+player_form_plot <- player_form_data %>%
+  # include group = player_id so the lines will be connected for each player
+  ggplot(aes(x = game_id, y = exp_goals, group = player_id,
+             fill = player_id, colour = player_id,
+             text = paste("Player:", player_id,
+                          "<br>Goals:", n_goals,
+                          "<br>Shots:", n_shots,
+                          "<br>Exp Goals:", exp_goals))) +
+  
+  geom_line() +
+  
+  # set the line colours to be different for each player 
+  # based on the previously set colour palette
+  scale_colour_manual(values = colour_palette_5) +
+  
+  
+  # set the breaks and limits on the x axis
+  scale_x_continuous(breaks = seq(1, max(player_form_data$game_id), by = 1),
+                     limits = c(1, max(player_form_data$game_id))) +
+  
+  # set the axis and legend labels
+  labs(y = "Expected Goals", x = "Match", colour = "") +
+  
+  # apply the minimal theme appearance
+  theme_minimal() +
+  
+  # remove the legend title
+  theme(legend.title = element_blank())
+
+```
+
+```{r}
+# create interactive visualisation using plotly
+
+# player_plot is the plot we want to convert to plotly plot
+player_form_plot %>%
+  # this setting shows what info to produce on mouse hover
+  # note that it is linked to the text arg in the ggplot
+  ggplotly(tooltip = "text") %>%
+  # set some options to change the font and legend
+  layout(font = list(family = "Arial"))
+```
+
+
