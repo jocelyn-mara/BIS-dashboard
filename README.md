@@ -1,5 +1,5 @@
 # BIS-dashboard
-This repository hosts all data and code files used to create a dashboard for assignment 1 of the Business Intelligence Systems PG unit at the University of Canberra. 
+This repository hosts all data and code files used to create a dashboard for assignment 1 of the Business Intelligence Systems PG unit at the University of Canberra. The dashboard is hosted on the shinyapps server and can be found [here](https://jmara4.shinyapps.io/shooting_dashboard_mockup/).
 
 This repository contains the following files and directories:
 
