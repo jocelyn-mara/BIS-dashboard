@@ -1,0 +1,297 @@
+---
+title: "Team Passing Network Visualisation"
+author: "Jocelyn Mara, University of Canberra"
+date: "2022-04-01"
+---
+
+## Set up
+
+```{r}
+# Load the packages we will be using:
+library(tidyverse)
+library(ggsoccer)
+```
+
+```{r}
+# Source the pitch dimensions from the `soccer-pitch-dimensions_statsbomb.R` code file
+# assumes the file is in the 'code' directory
+# which is in the current working directory
+source("code/soccer-pitch-dimensions_statsbomb.R")
+```
+
+## Get StatsBomb data
+
+```{r}
+# Get the URL for the match
+# store the url in an object
+url <- "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/19748.json"
+```
+
+```{r}
+# store path and file name for where to save the data
+file_name <- "data/chelsea_liverpool_event-data.json"
+
+# download the data if the file doesn't already exist
+if (!file.exists(file_name)){
+  download.file(url, destfile = file_name)
+}
+```
+
+## Read data into R
+
+```{r}
+# Read the data into R using the `fromJSON` function from the **jsonlite** package:
+library(jsonlite)
+event_data <- fromJSON(txt = file_name)
+```
+
+## Finding substitute times
+
+```{r}
+# We want to create a network map for just starting players
+# So we need to subset data from match times prior to the first substitute
+event_data %>%
+  filter(team$name == "Chelsea FCW",
+         type$name == "Substitution") %>%
+  select(period, timestamp, minute, second)
+```
+
+```{r}
+# Find the time of the first substitution for Chelsea
+sub_time <- event_data %>%
+  filter(team$name == "Chelsea FCW",
+         type$name == "Substitution") %>%
+  summarise(sub_time = min(minute)) %>%
+  unlist %>%
+  unname
+
+sub_time
+```
+
+## Taking a data subset
+
+```{r}
+# Take a subset of the data with the following conditions:
+event_data_subset <- event_data %>%
+        # keep just chelsea's data
+  filter(team$name == "Chelsea FCW", 
+         # keep data prior to the first sub
+         minute < sub_time, 
+         # keep just these event types
+         type$name %in% c("Pass", "Ball Receipt*", "Ball Recovery", "Shot", 
+                          "Dispossessed", "Interception", "Clearance", 
+                          "Dribble", "Shot", "Goal Keeper", "Miscontrol", 
+                          "Error"))
+```
+
+## Player involvements for nodes
+
+- The size of the nodes is based on the number of involvements per player
+- The location of the nodes is based on each player's average location
+
+```{r}
+nodes <- event_data_subset %>%
+  # unnest the location variable
+  unnest_wider(location) %>%
+  # fix the new variable names  
+  rename("location_x" = ...1,
+         "location_y" = ...2) %>%
+  # flip the origin to be bottom left corner
+  mutate(location_y = abs(location_y - 80)) %>%
+  # calculate average x,y location and n events for each player
+  group_by("player" = player$name) %>% 
+  summarise(x = mean(location_x, na.rm = TRUE), 
+            y = mean(location_y, na.rm = TRUE), 
+            n_events = n())
+```
+
+## Nodes
+
+```{r}
+ggplot(data = nodes) +
+  geom_point(aes(x = x, y = y, size = n_events, colour = n_events))
+```
+
+## Edge
+
+- To create the edges, we need to calculate how many times each player passed to every other player
+- To start, we will take a subset of just the passing data
+
+```{r}
+# filter pass data
+pass_data <- event_data_subset %>%
+  filter(type$name == "Pass") # note the use of $
+```
+
+## Select variables
+
+- Store just variables of interest in their own objects:
+
+```{r}
+passing_player <- pass_data$player$name
+receiving_player <- pass_data$pass$recipient$name
+type <- pass_data$pass$type$name
+outcome <- pass_data$pass$outcome$name
+```
+
+- Combine variables into a single *tibble* (tidyverse dataframe)
+
+```{r}
+pass_data <- tibble(passing_player,
+                    receiving_player,
+                    type,
+                    outcome)
+```
+
+## Fix NA values
+
+- Passes that were "completed" are stored as `NA` in the `outcome` variable
+- "Regular" passes are also stored as `NA` in the `type` variable
+
+```{r}
+pass_data <- pass_data %>%
+  # replace na values in the type and outcome variables
+  replace_na(replace = list(type = "Regular", outcome = "Complete")) %>%
+  # just keep passes that were incomplete or complete
+  filter(outcome %in% c("Incomplete", "Complete"))
+```
+
+
+## Edges
+
+- We are only interested in "completed" passes so we will just count these data
+
+```{r}
+edges <- pass_data %>%
+  # calculate number of times each player passed to every other player
+  group_by(passing_player, receiving_player) %>%
+  summarise(n = n()) %>%
+  # keep just complete cases
+  na.omit()
+```
+
+
+
+## Player to player interactions
+
+- Our n values are based on a given passer-receiver combination
+- We want to calculate total interactions though, regardless of who was passer or receiver
+
+```{r}
+edges2 <- edges %>%
+  group_by(player1 = pmin(passing_player, receiving_player),
+           player2 = pmax(passing_player, receiving_player)) %>%
+  summarise(n = sum(n))
+```
+
+
+## Minimum number of passes
+
+- We may want to remove observations where there were < 2 passes between two players
+
+```{r}
+# keep just rows where n > 1
+edges2 <- edges2 %>%
+  filter(n > 1)
+```
+
+## Edges and nodes  
+
+- Join the node data with the edge data
+
+```{r}
+network <- left_join(edges2, nodes,
+                   by = c("player1" = "player"))
+
+network <- left_join(network, nodes, 
+                     by = c("player2" = "player"))
+```
+
+- Check the result to understand what has happened here..
+
+## Rename variables  
+
+- Rename the variables for player1 (`.x`) and player2 (`.y`):
+
+```{r}
+network <- network %>%
+  # rename has the format new = old
+  rename(player1_x = x.x, player1_y = y.x, player1_n = n_events.x,
+         player2_x = x.y, player2_y = y.y, player2_n = n_events.y)
+```
+
+## Network nodes  
+
+```{r}
+ggplot(data = network) + 
+  # add the points for player1
+  geom_point(aes(x = player1_x, y = player1_y, 
+                 size = player1_n, colour = player1_n)) +
+  # add the points for player 2
+  geom_point(aes(x = player2_x, y = player2_y, 
+                 size = player2_n, colour = player2_n)) +
+  # rename the axis and legend titles
+  labs(x = "", y = "", colour = "n", size = "n")
+```
+
+
+## Network edges  
+
+- Add the edges to the plot using `geom_segment`
+
+```{r}
+ggplot(data = network) + 
+  
+  # add the edges based on start and end locations for player1 and player2
+  geom_segment(aes(x = player1_x, y = player1_y, 
+                   xend = player2_x, yend = player2_y,
+                   # set size and transparency based on number of involvements
+                   # between each player
+                   size = n, alpha = n),
+               colour = "darkgrey") +
+  
+  # add player 1 nodes
+  geom_point(aes(x = player1_x, y = player1_y, 
+                 size = player1_n, colour = player1_n)) +
+  # add player 2 nodes
+  geom_point(aes(x = player2_x, y = player2_y, 
+                 size = player2_n, colour = player2_n)) +
+  
+  # add names of player1 as text
+  geom_text(aes(label = player1, x = player1_x, y = player1_y)) +
+  
+  # add names of player2 as text
+  geom_text(aes(label = player2, x = player2_x, y = player2_y)) +
+  
+  # remove the legend
+  theme(legend.position = "none")
+```
+
+
+## Adding the pitch
+
+```{r}
+ggplot(data = network) + 
+  
+  # add the pitch as a backdrop to the network plot
+  annotate_pitch(dimensions = pitch_statsbomb_custom) +
+  
+  geom_segment(aes(x = player1_x, y = player1_y, 
+                   xend = player2_x, yend = player2_y,
+                   size = n, alpha = n),
+               colour = "darkgrey") +
+
+  geom_point(aes(x = player1_x, y = player1_y, 
+                 size = player1_n, colour = player1_n)) +
+    
+  geom_point(aes(x = player2_x, y = player2_y, 
+                 size = player2_n, colour = player2_n)) +
+  
+  geom_text(aes(label = player1, x = player1_x, y = player1_y), size = 3) +
+  
+  geom_text(aes(label = player2, x = player2_x, y = player2_y), size = 3) +
+  
+  theme(legend.position = "none") +
+  
+  theme_pitch()
+```

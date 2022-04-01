@@ -1,0 +1,53 @@
+---
+title: "Possession heatmap"
+author: "Jocelyn Mara, University of Canberra"
+date: "2022-04-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      knitr.table.format = "html", 
+                      fig.align = "center",
+                      class.source='chunkstyle') # set code chunk appearance
+             
+```
+
+## Set up
+
+```{r}
+library(tidyverse)
+library(ggsoccer)
+```
+
+- Source the pitch dimensions from the `soccer-pitch-dimensions_statsbomb.R` code file
+
+```{r}
+# assumes the file is in the 'code' directory
+# which is in the current working directory
+source("code/soccer-pitch-dimensions_statsbomb.R")
+```
+
+## Passing data
+
+- Read in the *processed* passing data we used in the previous lesson
+
+```{r}
+pass_data <- read_csv("data/pass_data.csv")
+```
+
+## Passing heatmap
+
+```{r fig.show='hide'}
+pass_data %>%
+  ggplot(aes(x = end_x, y = end_y)) +  # show where passes ended
+  annotate_pitch(dimensions = pitch_statsbomb_custom, 
+                 colour = "white", fill = "darkgrey") +
+  geom_density_2d_filled(alpha = 0.7) + # layer to add the heatmap
+  scale_x_continuous(limits = c(0, 120)) +  # set the x and y axis limits
+  scale_y_continuous(limits = c(0, 80)) +
+  theme_pitch() +
+  scale_fill_viridis_d(option = "A") + # set colour palette
+  theme(legend.position = "none")  # remove legend
+```
